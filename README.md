@@ -8,7 +8,7 @@ Note that libfreenect is an essential part of this project. Please visit their r
 
 
 
-\\## \\\*\\\*Raspberry Pi Setup\\\*\\\*
+\## Raspbery Pi Setup
 
 
 
