@@ -4,11 +4,11 @@ This is a project where I will attempt to use my Xbox360 kinnect with a rasberry
 
 
 
-Note that libfreenect is an essential part of this project. Please visit their repo for troubleshooting and extra information on dependices and cmake list options. I will be scripting with java/python, but other languages are permitted. 
+Note that libfreenect is an essential part of this project. Please visit their repo \[(https://github.com/OpenKinect/libfreenect)] for troubleshooting and extra information on dependices and cmake list options. I will be scripting with java/python, but other languages are permitted. 
 
 
 
-\## Raspberry Pi Setup
+\## \*\*Raspberry Pi Setup\*\*
 
 
 
@@ -22,11 +22,11 @@ sudo apt update
 
 sudo apt install -y \\
 
-&nbsp; git cmake build-essential \\
+\- git cmake build-essential \\
 
-&nbsp; libusb-1.0-0-dev freeglut3-dev libopengl-dev \\
+\- libusb-1.0-0-dev freeglut3-dev libopengl-dev \\
 
-&nbsp; python3-dev python3-numpy cython3
+\- python3-dev python3-numpy cython3
 
 ```
 
