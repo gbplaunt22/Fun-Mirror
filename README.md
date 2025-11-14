@@ -21,6 +21,7 @@ sudo apt install -y \
 ```
 
 ## Build and install libfreenect
+Please refer to the libfreenect repo for better instructions!
 
 ```bash
 cd ~
