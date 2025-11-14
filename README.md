@@ -4,11 +4,11 @@ This is a project where I will attempt to use my Xbox360 kinnect with a rasberry
 
 
 
-Note that libfreenect is an essential part of this project. Please visit their repo \[(https://github.com/OpenKinect/libfreenect)] for troubleshooting and extra information on dependices and cmake list options. I will be scripting with java/python, but other languages are permitted. 
+Note that libfreenect is an essential part of this project. Please visit their repo https://github.com/OpenKinect/libfreenect for troubleshooting and extra information on dependices and cmake list options. I will be scripting with java/python, but other languages are permitted. 
 
 
 
-\## \*\*Raspberry Pi Setup\*\*
+\\## \\\*\\\*Raspberry Pi Setup\\\*\\\*
 
 
 
