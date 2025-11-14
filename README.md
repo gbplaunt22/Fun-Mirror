@@ -10,6 +10,8 @@ Note that libfreenect is an essential part of this project. Please visit their r
 
 \## Raspberry Pi Setup
 
+
+
 Install system dependencies:
 
 
@@ -20,17 +22,21 @@ sudo apt update
 
 sudo apt install -y \\
 
-&nbsp;	git cmake build-essential \\
+&nbsp; git cmake build-essential \\
 
-&nbsp;	libusb-1.0.0-dev freeglut3-dev libopeng1-dev \\
+&nbsp; libusb-1.0-0-dev freeglut3-dev libopengl-dev \\
 
-&nbsp;	python3-dev python3-numpy cython3
+&nbsp; python3-dev python3-numpy cython3
+
+```
 
 
 
 \## Build and install libfreenect
 
 
+
+```bash
 
 cd ~
 
@@ -48,25 +54,31 @@ sudo make install
 
 sudo ldconfig
 
+```
+
 
 
 \## Install Python Bindings:
 
 
 
+```bash
+
 cd ~/libfreenect/wrappers/python
 
 sudo python3 setup.py install
+
+```
 
 
 
 \## Test
 
-
+```bash
 
 python3 -c "import freenect; print('freenect imported OK')"
 
-
+```
 
 
 
