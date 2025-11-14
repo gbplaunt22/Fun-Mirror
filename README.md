@@ -10,6 +10,8 @@ Also, note that this is my first project repo and **I do not fully understand de
 
 ## Raspbery Pi Setup
 
+These steps assume a fresh Raspberry Pi OS with an Xbox 360 Kinect V1 plugged in via USB. 
+
 Install system dependencies:
 
 ```bash
@@ -45,3 +47,86 @@ sudo python3 setup.py install
 ```bash
 python3 -c "import freenect; print('freenect imported OK')"
 ```
+----------------------------------------------------------------------
+## Java Wrapper usage explanation
+
+This repo already includes OpenKinect.jar and jna-5.13.0.jar
+As long as you have a JDK installed, you can compile and run Java programs that talk to the Kinect.
+
+## Example: running a Java class on the pi
+Assuming you have a class like mirror.SimpleKinect under src/
+
+```bash
+cd ~/Fun-Mirror
+
+#compile
+javac -cp lib/OpenKinect.jar:lib/jna-5.13.0.jar src/mirror/SimpleKinect.java
+
+# Run (With Kinect plugged in)
+java -cp lib/OpenKinect.jar:lib/jna-5.13.0.jar:src mirror.SimpleKinect
+```
+
+The same JARs are used via your IDE by adding:
++ lib/OpenKinect.jar
++ lib/jna-5.13.0.jar
+
+to the project's build path.
+
+----------------------------------------------------
+## Java Wrapper Setup
+**THESE ARE MAINTAINER NOTES!!! YOU WILL NOT NEED TO DO THIS!!!**
+
+Building the Java wrapper with Maven:
+
+```bash
+cd ~/libfreenect/wrappers/java
+nano pom.xml
+```
+
+In the maven-compiler-plugin section, make sure the Java version is at least 1.8:
+
+```xmi
+<plugin>
+  <groupId>org.apache.maven.plugins</groupId>
+  <artifactId>maven-compiler-plugin</artifactId>
+  <version>2.3.2</version>
+  <configuration>
+    <source>1.8</source>
+    <target>1.8</target>
+  </configuration>
+</plugin>
+```
+
+Save and exit, then build the JAR without running the tests (I'm not 100% why, but it works for me! :D)
+
+```bash
+cd ~/libfreenect/wrappers/java
+mvn -DskipTests package
+```
+
+Now you should see a JAR in target/
+
+```bash
+ls target
+# freenect-1.0.jar (name may vary)
+```
+
+## Copy the wrapper + JNA jars into Fun-Mirror repo
+```bash
+# From the Java wrapper build dir:
+cd ~/libfreenect/wrappers/java/target
+
+mkdir -p ~/Fun-Mirror/lib
+
+# Copy the freenect Java wrapper
+cp freenect-1.0.jar ~/Fun-Mirror/lib/OpenKinect.jar
+
+# Copy the JNA jar from the system install
+cp /usr/share/java/jna-5.13.0.jar ~/Fun-Mirror/lib #(jna jar name may vary!)
+```
+
+
+
+
+
+
