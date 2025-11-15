@@ -49,6 +49,8 @@ public class DepthPresenceTest {
 		
 		
 		dev.setLed(LedStatus.OFF);
+		dev.close();
+		System.exit(0);
 	////////////////////////////////////////////////
 		
 	}
