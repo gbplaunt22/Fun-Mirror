@@ -70,7 +70,7 @@ public class KinectHelpers {
 				break;
 			}
 			//break between polls
-			sleep(50);
+			sleep(2000);
 			dev.setTiltAngle(targetDeg + 5);
 			sleep(2000);//keep trying to set it
 		}
