@@ -38,10 +38,15 @@ public class KinectHelpers {
 	}
 	
 	//Method for sleeeeeepyyyyy timeeeeeeee (ms)
-	public static void sleep(int ms) {
+	public void sleep(int ms) {
 		try {
 			Thread.sleep(ms);
 		} catch (InterruptedException ignored) {}
+	}
+	
+	//sets the kinnect tilt angle to 0 degrees, leveling it
+	public void level(Device dev) {
+		dev.setTiltAngle(0);
 	}
 	
 	

@@ -41,18 +41,31 @@ public class DepthPresenceTest {
 		System.out.println("Tilt status: " + tiltStatus);
 		System.out.println("Accel (x,y,z): " + 
 				accel[0] + ", " + accel[1] + ", " + accel[2]);
+
+	////////////////////////////////////////////////
 		
-		//Testing Tilt
-		System.out.println("Tilting by 15 degrees, hold your horses!");
+		//Testing Tilt/////
+		int testAngle = 15;
+
+		System.out.println("Tilting to 0 degrees");
+		helper.level(dev);
+		//Let the motor do its thing
+		helper.sleep(3000);
+		dev.refreshTiltState();
+		System.out.println("Device is now " + dev.getTiltAngle() + " degrees.");
+
+		System.out.println("Tilting to " + testAngle + " degrees.");
+		dev.setTiltAngle(testAngle);
+		//Let the motor do its thing
+		helper.sleep(3000);
+		dev.refreshTiltState();
+		System.out.println("Device is now " + dev.getTiltAngle() + " degrees.");
+		///////////////////
 		
-		
-		
-		
+		//Shut down
 		dev.setLed(LedStatus.OFF);
 		dev.close();
 		System.exit(0);
-	////////////////////////////////////////////////
 		
 	}
-
 }
