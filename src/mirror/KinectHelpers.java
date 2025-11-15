@@ -47,7 +47,7 @@ public class KinectHelpers {
 	//A helper method to keep tilting until motor stops moving
 	public void waitUntilStopped(Device dev, double targetDeg) {
 		//tolerance, aka how much error is allowed in degrees
-		double TOL = 0.5;
+		double TOL = 1.0;
 		long start = System.currentTimeMillis();
 		
 		while(true) {
@@ -64,13 +64,15 @@ public class KinectHelpers {
 			}
 			
 			// safety timeout (7 seconds later)
-			if (System.currentTimeMillis() - start > 7_000) {
+			if (System.currentTimeMillis() - start > 15_000) {
 				System.out.println("Timeout waiting for tilt, " +
 				"current angle: " + angle);
 				break;
 			}
 			//break between polls
 			sleep(50);
+			dev.setTiltAngle(targetDeg + 5);
+			sleep(2000);//keep trying to set it
 		}
 	}
 	
