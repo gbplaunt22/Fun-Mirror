@@ -4,6 +4,7 @@ import org.openkinect.freenect.Context;
 import org.openkinect.freenect.Device;
 import org.openkinect.freenect.Freenect;
 import org.openkinect.freenect.LedStatus;
+import org.openkinect.freenect.TiltStatus;
 
 
 public class SimpleKinect {
@@ -35,19 +36,42 @@ public class SimpleKinect {
 		
 		//Hello world! #Blink LED
 		dev.setLed(LedStatus.BLINK_RED_YELLOW);
-		System.out.println("Blinking LED for 3 seconds...");
+		System.out.println("Blinking LED until end of program...");
+		System.out.println("Waiting 3 seconds just for the F#&% of it");
+		sleep(3000);
+
+		//Tilt + accelerometer test
+		dev.refreshTiltState();
+		double angle = dev.getTiltAngle();
+		TiltStatus status = dev.getTiltStatus();
+		double [] accel = dev.getAccel();       // [ax, ay, az]
+		 
+		System.out.println("Tilt angle: " + angle + " degrees" );
+		System.out.println("Tilt status: " + status);
+		System.out.println("Accel (x,y,z): " + 
+				accel[0] + ", " + accel[1] + ", " + accel[2]);
 		
-		try {
-			Thread.sleep(3000);
-			//This catch block is so our sleeping thread is not interrupted.
-		} catch (InterruptedException ignored) {}
+		//LETS TEST TILT!!!!!
+		System.out.println("Tilting by 5 degrees, hold your horses!");
+		dev.setTiltAngle(angle + 5);
+		sleep(2000); 
+		dev.refreshTiltState();
+		System.out.println("New Tilt angle: " + dev.getTiltAngle() + " degrees" );
+
 		
+		//We are not calling ctx.shutdown() as it seems to upset liusb
 		//turn off LED
 		dev.setLed(LedStatus.OFF);
 		dev.close();
-		
-		//We are not calling ctx.shutdown() as it seems to upset liusb
 		System.out.println("Done. LED off, exiting");
 		System.exit(0);
+		
+
+	}
+	//Method for sleeeeeepyyyyy timeeeeeeee (ms)
+	private static void sleep(int ms) {
+		try {
+			Thread.sleep(ms);
+		} catch (InterruptedException ignored) {}
 	}
 }
