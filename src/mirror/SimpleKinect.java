@@ -1,3 +1,4 @@
+/* 
 package mirror;
 
 import org.openkinect.freenect.Context;
@@ -49,3 +50,4 @@ public class SimpleKinect extends KinectHelpers{
 	
 	
 }
+*/
