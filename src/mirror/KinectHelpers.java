@@ -44,9 +44,43 @@ public class KinectHelpers {
 		} catch (InterruptedException ignored) {}
 	}
 	
-	//sets the kinnect tilt angle to 0 degrees, leveling it
-	public void level(Device dev) {
-		dev.setTiltAngle(0);
+	//A helper method to keep tilting until motor stops moving
+	public void waitUntilStopped(Device dev, double targetDeg) {
+		//tolerance, aka how much error is allowed in degrees
+		double TOL = 0.5;
+		long start = System.currentTimeMillis();
+		
+		while(true) {
+			dev.refreshTiltState();
+			TiltStatus status = dev.getTiltStatus();
+			double angle = dev.getTiltAngle();
+			
+			//Close enough & motor not moving!
+			if (status == TiltStatus.STOPPED &&
+					Math.abs(angle - targetDeg) < TOL) {
+				System.out.println("Tilt done at " 
+				+ angle + " degrees.");
+				break;
+			}
+			
+			// safety timeout (15 seconds later)
+			if (System.currentTimeMillis() - start > 15_000) {
+				System.out.println("Timeout waiting for tilt, " +
+				"current angle: " + angle);
+				break;
+			}
+			//break between polls
+			sleep(50);
+		}
+	}
+	
+	//sets the kinnect tilt angle to 0 degrees,
+	//returning true when its leveled
+	//This is my cutest method :)
+	public boolean level(Device dev, double deg) {
+		dev.setTiltAngle(deg);
+		waitUntilStopped(dev, deg);
+		return true;
 	}
 	
 	

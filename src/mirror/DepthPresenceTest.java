@@ -47,20 +47,22 @@ public class DepthPresenceTest {
 		//Testing Tilt/////
 		int testAngle = 15;
 
+		//Try to level to 0 degrees
 		System.out.println("Tilting to 0 degrees");
-		helper.level(dev);
-		//Let the motor do its thing
-		helper.sleep(3000);
-		dev.refreshTiltState();
-		System.out.println("Device is now " + dev.getTiltAngle() + " degrees.");
-
+		helper.level(dev, 0);
+		
+		//try to level to TestAngle!
 		System.out.println("Tilting to " + testAngle + " degrees.");
-		dev.setTiltAngle(testAngle);
-		//Let the motor do its thing
+		helper.level(dev, testAngle);
+		
+		//now level back to 0....
+		System.out.println("Tiltiing back to 0 degrees");
+		helper.level(dev, 0);
+		
+		System.out.println("Sleeping for 3 seconds!");
 		helper.sleep(3000);
-		dev.refreshTiltState();
-		System.out.println("Device is now " + dev.getTiltAngle() + " degrees.");
-		///////////////////
+		
+	/////////////////////////////////////////////
 		
 		//Shut down
 		dev.setLed(LedStatus.OFF);
