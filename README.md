@@ -1,14 +1,14 @@
 # Fun-Mirror
 
-This is a project where I will attempt to use my Xbox360 kinnect with a rasberry pi, hooked up to a monitor with a two-way mirror infront, or a "Smart Mirror". This is a big WIP. This desc needs to be filled!
+This is a project where I will attempt to use my Xbox 360 Kinect with a Raspberry Pi, hooked up to a monitor with a two-way mirror in front, or a "Smart Mirror". This is a big WIP. This desc needs to be filled!
 
 
 
-Note that libfreenect is an essential part of this project. Please visit their repo https://github.com/OpenKinect/libfreenect for troubleshooting and extra information on dependices and cmake list options. I will be scripting with java/python, but other languages are permitted. 
+Note that libfreenect is an essential part of this project. Please visit their repo https://github.com/OpenKinect/libfreenect for troubleshooting and extra information on dependencies and CMake list options. I will be scripting with Java/Python, but other languages are permitted. 
 
-Also, note that this is my first project repo and **I do not fully understand dependicies/installiation for machines other than my own!** Please install dependencies with scrutinity in mind. 
+Also, note that this is my first project repo, and **I do not fully understand dependencies/installation for machines other than my own!** Please install dependencies with scrutiny in mind. 
 
-## Raspbery Pi Setup
+## Raspberry Pi Setup
 
 These steps assume a fresh Raspberry Pi OS with an Xbox 360 Kinect V1 plugged in via USB. 
 
