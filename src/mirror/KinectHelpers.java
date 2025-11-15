@@ -63,8 +63,8 @@ public class KinectHelpers {
 				break;
 			}
 			
-			// safety timeout (15 seconds later)
-			if (System.currentTimeMillis() - start > 15_000) {
+			// safety timeout (7 seconds later)
+			if (System.currentTimeMillis() - start > 7_000) {
 				System.out.println("Timeout waiting for tilt, " +
 				"current angle: " + angle);
 				break;
@@ -81,6 +81,23 @@ public class KinectHelpers {
 		dev.setTiltAngle(deg);
 		waitUntilStopped(dev, deg);
 		return true;
+	}
+	
+	//A helper method to test tilting to a given angle
+	public void testTiltHelper(Device dev, double testAngle) {
+		KinectHelpers helper = new KinectHelpers();
+		
+		//Try to level to 0 degrees
+		System.out.println("Tilting to 0 degrees");
+		helper.level(dev, 0);
+		
+		//try to level to TestAngle!
+		System.out.println("Tilting to " + testAngle + " degrees.");
+		helper.level(dev, testAngle);
+		
+		//now level back to 0....
+		System.out.println("Tilting back to 0 degrees");
+		helper.level(dev, 0);
 	}
 	
 	

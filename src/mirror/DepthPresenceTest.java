@@ -5,6 +5,8 @@ import org.openkinect.freenect.Freenect;
 import org.openkinect.freenect.Device;
 import org.openkinect.freenect.LedStatus;
 import org.openkinect.freenect.TiltStatus;
+import org.openkinect.freenect.DepthFormat;
+import org.openkinect.freenect.*;
 
 import java.nio.ByteBuffer;
 import java.nio.ShortBuffer;
@@ -43,25 +45,10 @@ public class DepthPresenceTest {
 				accel[0] + ", " + accel[1] + ", " + accel[2]);
 
 	////////////////////////////////////////////////
-		
-		//Testing Tilt/////
-		int testAngle = 15;
-
-		//Try to level to 0 degrees
-		System.out.println("Tilting to 0 degrees");
-		helper.level(dev, 0);
-		
-		//try to level to TestAngle!
-		System.out.println("Tilting to " + testAngle + " degrees.");
-		helper.level(dev, testAngle);
-		
-		//now level back to 0....
-		System.out.println("Tiltiing back to 0 degrees");
-		helper.level(dev, 0);
-		
-		System.out.println("Sleeping for 3 seconds!");
-		helper.sleep(3000);
-		
+		//Testing tilt
+		System.out.println("Tilting to 15 degrees...");
+		helper.testTiltHelper(dev,15);
+		helper.sleep(1000);
 	/////////////////////////////////////////////
 		
 		//Shut down
