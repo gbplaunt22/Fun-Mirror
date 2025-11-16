@@ -286,6 +286,11 @@ static int find_head_pixel(const uint16_t *depth,
     int depth_hist[DEPTH_FAR + 1];
     memset(depth_hist, 0, sizeof(depth_hist));
 
+    // Histogram of valid depth samples inside the search window.  We only need
+    // entries up to FAR (inclusive) because we ignore everything beyond that.
+    int depth_hist[FAR + 1];
+    memset(depth_hist, 0, sizeof(depth_hist));
+
     for (int v = V_MIN; v < V_MAX; ++v) {
         int row = v * DW;
         for (int u = U_MIN; u < U_MAX; ++u) {
