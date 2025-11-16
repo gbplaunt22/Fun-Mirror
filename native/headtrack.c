@@ -43,6 +43,10 @@ static uint16_t depth_buf[DW * DH];
 // shrink the slab to a tiny range and the tracker never finds the real player
 // unless they stand extremely close.
 #define MIN_FOREGROUND_PIXELS 150
+#define MIN_LOCAL_SUPPORT 8
+
+#define DEPTH_NEAR 300
+#define DEPTH_FAR 3500
 
 static int estimate_min_blob_width(uint16_t depth_mm)
 {
@@ -66,104 +70,36 @@ static int estimate_min_blob_width(uint16_t depth_mm)
     return min_width;
 }
 
-// Find a "head" pixel using a depth-based person blob:
-//  1) find nearest valid depth in a central region
-//  2) treat pixels within [d_min, d_min + SLAB] as foreground
-//  3) clean the mask with a 3x3 erosion/dilation to suppress speckles
-//  4) scan columns to find the largest contiguous blob of top-most pixels
-//  5) return the centroid of those top pixels for a stable head point
-// Find a "head" pixel in the central region by taking the CLOSEST valid pixel.
-// Returns 1 if found, 0 otherwise.
-static int find_head_pixel(const uint16_t *depth,
-                           int *out_u, int *out_v, uint16_t *out_z)
+static int slab_population(const int *prefix_hist, int start_depth)
 {
-    // Throw away crazy distances
-    const uint16_t NEAR = 300;   // too close (< ~0.5m) – ignore
-    const uint16_t FAR  = 3500;  // too far  (> ~3.5m) – ignore
-
-    uint16_t nearest_sample = 0xFFFF;
-    int best_u = -1;
-    int best_v = -1;
-
-    // Histogram of valid depth samples inside the search window.  We only need
-    // entries up to FAR (inclusive) because we ignore everything beyond that.
-    int depth_hist[FAR + 1];
-    memset(depth_hist, 0, sizeof(depth_hist));
-
-    for (int v = V_MIN; v < V_MAX; ++v) {
-        int row = v * DW;
-        for (int u = U_MIN; u < U_MAX; ++u) {
-            uint16_t d = depth[row + u];
-
-            if (d == 0)      continue;     // invalid
-            if (d < NEAR)    continue;     // too close
-            if (d > FAR)     continue;     // too far
-
-            depth_hist[d]++;
-
-            if (d < nearest_sample) {
-                nearest_sample = d;
-                best_u = u;
-                best_v = v;
-            }
-        }
-    }
-
-    if (best_u < 0)
+    if (start_depth > DEPTH_FAR)
         return 0;
+    int end = start_depth + SLAB;
+    if (end > DEPTH_FAR)
+        end = DEPTH_FAR;
+    int before = (start_depth > 0) ? prefix_hist[start_depth - 1] : 0;
+    return prefix_hist[end] - before;
+}
 
-    // Pick the nearest depth range that has enough support to actually look
-    // like a foreground blob instead of a handful of stray pixels near the
-    // sensor.  Slide a window the size of SLAB across the histogram and grab
-    // the first window whose population crosses MIN_FOREGROUND_PIXELS.
-    int running = 0;
-    int best_depth_idx = -1;
-    for (int d = NEAR; d <= FAR; ++d) {
-        running += depth_hist[d];
-        int drop_idx = d - SLAB - 1;
-        if (drop_idx >= NEAR) {
-            running -= depth_hist[drop_idx];
-        }
-        if (running >= MIN_FOREGROUND_PIXELS) {
-            int window_start = d - SLAB;
-            if (window_start < NEAR)
-                window_start = NEAR;
-            best_depth_idx = window_start;
-            break;
-        }
+static int find_first_depth_in_slab(const int *depth_hist, int start_depth)
+{
+    if (start_depth > DEPTH_FAR)
+        return -1;
+    int end = start_depth + SLAB;
+    if (end > DEPTH_FAR)
+        end = DEPTH_FAR;
+    for (int d = start_depth; d <= end; ++d) {
+        if (depth_hist[d] > 0)
+            return d;
     }
+    return -1;
+}
 
-    // Fall back to the first depth with a bit of support if no slab clears the
-    // global population threshold.  This still rejects single-pixel noise but
-    // keeps the tracker alive when the window only covers a small part of the
-    // user.
-    if (best_depth_idx < 0) {
-        const int MIN_LOCAL_SUPPORT = 8;
-        for (int d = NEAR; d <= FAR; ++d) {
-            if (depth_hist[d] >= MIN_LOCAL_SUPPORT) {
-                best_depth_idx = d;
-                break;
-            }
-        }
-    }
+static int try_depth_candidate(const uint16_t *depth,
+                               uint16_t best_depth,
+                               int *out_u, int *out_v, uint16_t *out_z)
+{
 
-    // No reasonable depth candidate? bail.
-    if (best_depth_idx < 0)
-        return 0;
-
-    uint16_t best_depth = nearest_sample;
-    int search = best_depth_idx;
-    int search_max = search + SLAB;
-    if (search_max > FAR)
-        search_max = FAR;
-    while (search <= search_max && depth_hist[search] == 0) {
-        search++;
-    }
-    if (search <= search_max) {
-        best_depth = (uint16_t)search;
-    }
-
-    // Foreground mask of everything near the closest observed depth.
     uint8_t slab_mask[DW * DH];
     memset(slab_mask, 0, sizeof(slab_mask));
     uint16_t slab_max = best_depth + SLAB;
@@ -176,17 +112,14 @@ static int find_head_pixel(const uint16_t *depth,
         for (int u = U_MIN; u < U_MAX; ++u) {
             uint16_t d = depth[row + u];
             if (d == 0)      continue;
-            if (d < NEAR)    continue;
-            if (d > FAR)     continue;
+            if (d < DEPTH_NEAR)    continue;
+            if (d > DEPTH_FAR)     continue;
             if (d < best_depth) continue;
             if (d > slab_max)   continue;
             slab_mask[row + u] = 1;
         }
     }
 
-    // Morphological clean-up: 3x3 erosion followed by dilation.  This keeps
-    // the implementation portable (no SIMD assumptions) while removing speckle
-    // noise from the mask.
     uint8_t eroded[DW * DH];
     memset(eroded, 0, sizeof(eroded));
     for (int v = V_MIN + 1; v < V_MAX - 1; ++v) {
@@ -250,7 +183,6 @@ static int find_head_pixel(const uint16_t *depth,
     if (total_columns == 0)
         return 0;
 
-    // Locate the widest contiguous run of columns that have a valid top pixel.
     int best_start = -1;
     int best_end = -1;
     int best_len = 0;
@@ -278,7 +210,10 @@ static int find_head_pixel(const uint16_t *depth,
     }
 
     int min_blob_width = estimate_min_blob_width(best_depth);
-    if (best_len < min_blob_width || best_start < 0)
+    int max_blob_width = min_blob_width * 4;
+    if (max_blob_width > (U_MAX - U_MIN))
+        max_blob_width = (U_MAX - U_MIN);
+    if (best_len < min_blob_width || best_len > max_blob_width || best_start < 0)
         return 0;
 
     double sum_u = 0.0;
@@ -304,6 +239,109 @@ static int find_head_pixel(const uint16_t *depth,
     *out_v = centroid_v;
     *out_z = best_depth;
     return 1;
+}
+
+static int attempt_depth_candidates(const uint16_t *depth,
+                                    const int *depth_hist,
+                                    const int *prefix_hist,
+                                    int start_depth,
+                                    int min_support,
+                                    int *out_u, int *out_v, uint16_t *out_z)
+{
+    int s = start_depth;
+    if (s < DEPTH_NEAR)
+        s = DEPTH_NEAR;
+    while (s <= DEPTH_FAR) {
+        int support = slab_population(prefix_hist, s);
+        if (support >= min_support) {
+            int best_depth = find_first_depth_in_slab(depth_hist, s);
+            if (best_depth >= 0) {
+                if (try_depth_candidate(depth, (uint16_t)best_depth,
+                                        out_u, out_v, out_z)) {
+                    return 1;
+                }
+                s = best_depth + SLAB;
+                continue;
+            }
+        }
+        s++;
+    }
+    return 0;
+}
+
+// Find a "head" pixel using a depth-based person blob:
+//  1) find nearest valid depth in a central region
+//  2) treat pixels within [d_min, d_min + SLAB] as foreground
+//  3) clean the mask with a 3x3 erosion/dilation to suppress speckles
+//  4) scan columns to find the largest contiguous blob of top-most pixels
+//  5) return the centroid of those top pixels for a stable head point
+// Find a "head" pixel in the central region by taking the CLOSEST valid pixel.
+// Returns 1 if found, 0 otherwise.
+static int find_head_pixel(const uint16_t *depth,
+                           int *out_u, int *out_v, uint16_t *out_z)
+{
+    uint16_t nearest_sample = 0xFFFF;
+    int found_sample = 0;
+
+    int depth_hist[DEPTH_FAR + 1];
+    memset(depth_hist, 0, sizeof(depth_hist));
+
+    // Histogram of valid depth samples inside the search window.  We only need
+    // entries up to FAR (inclusive) because we ignore everything beyond that.
+    int depth_hist[FAR + 1];
+    memset(depth_hist, 0, sizeof(depth_hist));
+
+    for (int v = V_MIN; v < V_MAX; ++v) {
+        int row = v * DW;
+        for (int u = U_MIN; u < U_MAX; ++u) {
+            uint16_t d = depth[row + u];
+
+            if (d == 0)      continue;     // invalid
+            if (d < DEPTH_NEAR)    continue;     // too close
+            if (d > DEPTH_FAR)     continue;     // too far
+
+            depth_hist[d]++;
+
+            if (d < nearest_sample) {
+                nearest_sample = d;
+                found_sample = 1;
+            }
+        }
+    }
+
+    if (!found_sample)
+        return 0;
+
+    int prefix_hist[DEPTH_FAR + 1];
+    int accum = 0;
+    for (int d = 0; d <= DEPTH_FAR; ++d) {
+        accum += depth_hist[d];
+        prefix_hist[d] = accum;
+    }
+
+    int search_start = nearest_sample;
+    if (search_start < DEPTH_NEAR)
+        search_start = DEPTH_NEAR;
+
+    int thresholds[] = {
+        MIN_FOREGROUND_PIXELS,
+        MIN_FOREGROUND_PIXELS / 2,
+        MIN_FOREGROUND_PIXELS / 4,
+        MIN_LOCAL_SUPPORT
+    };
+    const int num_thresholds = (int)(sizeof(thresholds) / sizeof(thresholds[0]));
+    for (int i = 0; i < num_thresholds; ++i) {
+        int min_support = thresholds[i];
+        if (min_support < MIN_LOCAL_SUPPORT)
+            min_support = MIN_LOCAL_SUPPORT;
+        if (attempt_depth_candidates(depth, depth_hist, prefix_hist,
+                                     search_start, min_support,
+                                     out_u, out_v, out_z)) {
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 
