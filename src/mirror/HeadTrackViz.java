@@ -59,11 +59,13 @@ public class HeadTrackViz extends JPanel {
 		double hy = headTracker.getHeadY();
 		double hz = headTracker.getHeadZ();
 
-		// Big scaling for obvious motion
-		double scale = 500.0;
+		// hx, hy are now in [-1, 1] from the C code
+		double scale = Math.min(w, h) * 0.4;  // 40% of half-size => good margin
 
 		int px = (int) Math.round(cx + hx * scale);
-		int py = (int) Math.round(cy - hy * scale); // minus so up is up
+		// Kinect image coords increase downward, but for screen we want -hy = up
+		int py = (int) Math.round(cy - hy * scale);
+
 
 		// Clamp into window bounds
 		if (px < 0)

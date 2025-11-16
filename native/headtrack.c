@@ -139,13 +139,15 @@ static void depth_cb(freenect_device *dev, void *v_depth, uint32_t ts)
         return;
     }
 
-    double hx, hy, hz;
-    head_pixel_to_3d(u_head, v_head, z_head, &hx, &hy, &hz);
+        // --- convert to normalized image coords instead of meters ---
+    double hx = (u_head - DW / 2.0) / (DW / 2.0);  // -1 .. +1, left..right
+    double hy = (v_head - DH / 2.0) / (DH / 2.0);  // -1 .. +1, top..bottom
+    double hz = z_head / 1000.0;                   // keep z in meters just for reference
 
     // --- temporal smoothing (exponential moving average) ---
     static int have_prev = 0;
     static double shx = 0.0, shy = 0.0, shz = 0.0;
-    const double alpha = 0.25;  // 0..1
+    const double alpha = 0.25;  // 0..1; higher = snappier, lower = smoother
 
     if (have_prev) {
         hx = alpha * hx + (1.0 - alpha) * shx;
@@ -158,10 +160,10 @@ static void depth_cb(freenect_device *dev, void *v_depth, uint32_t ts)
     shx = hx;
     shy = hy;
     shz = hz;
-    // --------------------------------------------------------------
 
     printf("HEAD %.6f %.6f %.6f\n", hx, hy, hz);
     fflush(stdout);
+
 }
 
 // -------- main program --------
