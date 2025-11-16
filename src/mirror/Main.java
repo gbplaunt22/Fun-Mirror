@@ -10,8 +10,7 @@ public class Main {
 			 JFrame frame = new JFrame("Head Tracker Visualization");
 			 frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 			 //uses headtracker visualizer panel
-			 HeadTrackViz panel = new HeadTrackViz();
-			 frame.setContentPane(panel);
+			// frame.setContentPane(panel);
 			 
 			 frame.setSize(800, 600);
 			 frame.setLocationRelativeTo(null);
@@ -24,10 +23,6 @@ public class Main {
 			
 			//dev.setLed(LedStatus.BLINK_RED_YELLOW);
 		
-			
-			//Headtracker visualizer
-			HeadTrackViz hv = new HeadTrackViz();
-			HeadTrackViz.main(args);
 		});
 	}
 }
