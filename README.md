@@ -1,3 +1,6 @@
+# THIS README IS DEPERCATED IN THE CONTEXT OF THIS REPOSITORY!
+
+
 # Fun-Mirror
 
 This is a project where I will attempt to use my Xbox 360 Kinect with a Raspberry Pi, hooked up to a monitor with a two-way mirror in front, or a "Smart Mirror". This is a big WIP. This desc needs to be filled!
