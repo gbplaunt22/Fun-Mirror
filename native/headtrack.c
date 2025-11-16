@@ -71,24 +71,22 @@ static int find_head_pixel(const uint16_t *depth,
         }
     }
 
-    // 4) Aggregate columns
-    int sum_u = 0;
-    int count_u = 0;
-    int best_v = DH;  // smallest v among contributing columns
+        // 4) Choose the column where the blob is highest (smallest v)
+    int best_u = -1;
+    int best_v = DH;  // we want the smallest v
 
     for (int u = u_min; u < u_max; ++u) {
-        if (top_v[u] != -1) {
-            sum_u += u;
-            count_u++;
-            if (top_v[u] < best_v)
-                best_v = top_v[u];
+        int tv = top_v[u];
+        if (tv != -1 && tv < best_v) {
+            best_v = tv;
+            best_u = u;
         }
     }
 
-    if (count_u == 0)
+    if (best_u == -1)
         return 0;
 
-    int u_head = sum_u / count_u;
+    int u_head = best_u;
     int v_head = best_v;
 
     // Get an actual depth value near the head location
@@ -102,6 +100,7 @@ static int find_head_pixel(const uint16_t *depth,
     *out_v = v_head;
     *out_z = z_head;
     return 1;
+
 }
 
 // Convert head pixel (u,v,z) into rough 3D coordinates in Kinect space (meters)
