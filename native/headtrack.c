@@ -122,7 +122,7 @@ static void depth_cb(freenect_device *dev, void *v_depth, uint32_t ts)
     static int frame_count = 0;
     frame_count++;
 
-    // only every 5th frame
+    // only every 5th frame so we don't spam
     if (frame_count % 5 != 0)
         return;
 
@@ -132,32 +132,20 @@ static void depth_cb(freenect_device *dev, void *v_depth, uint32_t ts)
         return;
     }
 
-        // --- convert to normalized image coords instead of meters ---
-    double hx = (u_head - DW / 2.0) / (DW / 2.0);  // -1 .. +1, left..right
-    double hy = (v_head - DH / 2.0) / (DH / 2.0);  // -1 .. +1, top..bottom
-    double hz = z_head / 1000.0;                   // keep z in meters just for reference
+    // --- RAW normalized image coords [-1, 1] ---
+    double hx = (u_head - DW / 2.0) / (DW / 2.0);  // left..right
+    double hy = (v_head - DH / 2.0) / (DH / 2.0);  // top..bottom
+    double hz = z_head / 1000.0;                   // meters-ish
 
-    // --- temporal smoothing (exponential moving average) ---
-    static int have_prev = 0;
-    static double shx = 0.0, shy = 0.0, shz = 0.0;
-    const double alpha = 0.25;  // 0..1; higher = snappier, lower = smoother
+    // Helpful debug to stderr: where in the depth image is this?
+    fprintf(stderr, "HEAD_PIXEL u=%d v=%d z=%u  -> hx=%.3f hy=%.3f hz=%.3f\n",
+            u_head, v_head, z_head, hx, hy, hz);
 
-    if (have_prev) {
-        hx = alpha * hx + (1.0 - alpha) * shx;
-        hy = alpha * hy + (1.0 - alpha) * shy;
-        hz = alpha * hz + (1.0 - alpha) * shz;
-    } else {
-        have_prev = 1;
-    }
-
-    shx = hx;
-    shy = hy;
-    shz = hz;
-
+    // This is what Java parses: RAW values only
     printf("HEAD %.6f %.6f %.6f\n", hx, hy, hz);
     fflush(stdout);
-
 }
+
 
 // -------- main program --------
 
