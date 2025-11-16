@@ -7,6 +7,16 @@
 #define DW 640
 #define DH 480
 
+// Search window (relative to depth frame) that find_head_pixel() scans.
+// Keeping the window centralized reduces noise, but the coordinates we emit
+// need to be normalized to the window instead of the full sensor range or the
+// UI barely moves.  Keep the bounds in one place so both the detector and the
+// exporter agree.
+#define U_MIN (DW * 3 / 10)
+#define U_MAX (DW * 7 / 10)
+#define V_MIN (DH * 2 / 10)
+#define V_MAX (DH * 8 / 10)
+
 static freenect_context *f_ctx = NULL;
 static freenect_device  *f_dev = NULL;
 static uint16_t depth_buf[DW * DH];
@@ -32,12 +42,6 @@ static uint16_t depth_buf[DW * DH];
 static int find_head_pixel(const uint16_t *depth,
                            int *out_u, int *out_v, uint16_t *out_z)
 {
-    // Central window – tune these if needed
-    int u_min = DW * 3 / 10;   // 30% from left
-    int u_max = DW * 7 / 10;   // 70% from left
-    int v_min = DH * 2 / 10;   // 20% from top
-    int v_max = DH * 8 / 10;   // 80% from top
-
     // Throw away crazy distances
     const uint16_t NEAR = 300;   // too close (< ~0.5m) – ignore
     const uint16_t FAR  = 3500;  // too far  (> ~3.5m) – ignore
@@ -46,9 +50,9 @@ static int find_head_pixel(const uint16_t *depth,
     int best_u = -1;
     int best_v = -1;
 
-    for (int v = v_min; v < v_max; ++v) {
+    for (int v = V_MIN; v < V_MAX; ++v) {
         int row = v * DW;
-        for (int u = u_min; u < u_max; ++u) {
+        for (int u = U_MIN; u < U_MAX; ++u) {
             uint16_t d = depth[row + u];
 
             if (d == 0)      continue;     // invalid
@@ -110,14 +114,24 @@ static void depth_cb(freenect_device *dev, void *v_depth, uint32_t ts)
         return;
     }
 
-    // --- RAW normalized image coords [-1, 1] ---
-    double hx = (u_head - DW / 2.0) / (DW / 2.0);  // left..right
-    double hy = (v_head - DH / 2.0) / (DH / 2.0);  // top..bottom
+    // --- Normalized coords in [-1, 1] relative to the search window ---
+    double hx = ( (double)(u_head - U_MIN) / (double)(U_MAX - U_MIN) ) * 2.0 - 1.0;
+    double hy = ( (double)(v_head - V_MIN) / (double)(V_MAX - V_MIN) ) * 2.0 - 1.0;
+    if (hx < -1.0) hx = -1.0;
+    if (hx >  1.0) hx =  1.0;
+    if (hy < -1.0) hy = -1.0;
+    if (hy >  1.0) hy =  1.0;
     double hz = z_head / 1000.0;                   // meters-ish
 
+    // Also keep the sensor-relative values for debugging so we can see what
+    // the detector actually latched on to.
+    double hx_raw = (u_head - DW / 2.0) / (DW / 2.0);
+    double hy_raw = (v_head - DH / 2.0) / (DH / 2.0);
+
     // Helpful debug to stderr: where in the depth image is this?
-    fprintf(stderr, "HEAD_PIXEL u=%d v=%d z=%u  -> hx=%.3f hy=%.3f hz=%.3f\n",
-            u_head, v_head, z_head, hx, hy, hz);
+    fprintf(stderr,
+            "HEAD_PIXEL u=%d v=%d z=%u  -> raw(%.3f, %.3f) window-norm(%.3f, %.3f) hz=%.3f\n",
+            u_head, v_head, z_head, hx_raw, hy_raw, hx, hy, hz);
 
     // This is what Java parses: RAW values only
     printf("HEAD %.6f %.6f %.6f\n", hx, hy, hz);
