@@ -45,8 +45,8 @@ static uint16_t depth_buf[DW * DH];
 #define MIN_FOREGROUND_PIXELS 150
 #define MIN_LOCAL_SUPPORT 8
 
-#define DEPTH_NEAR 300
-#define DEPTH_FAR 3500
+#define DEPTH_MIN_MM 300
+#define DEPTH_MAX_MM 3500
 
 static int estimate_min_blob_width(uint16_t depth_mm)
 {
@@ -72,22 +72,22 @@ static int estimate_min_blob_width(uint16_t depth_mm)
 
 static int slab_population(const int *prefix_hist, int start_depth)
 {
-    if (start_depth > DEPTH_FAR)
+    if (start_depth > DEPTH_MAX_MM)
         return 0;
     int end = start_depth + SLAB;
-    if (end > DEPTH_FAR)
-        end = DEPTH_FAR;
+    if (end > DEPTH_MAX_MM)
+        end = DEPTH_MAX_MM;
     int before = (start_depth > 0) ? prefix_hist[start_depth - 1] : 0;
     return prefix_hist[end] - before;
 }
 
 static int find_first_depth_in_slab(const int *depth_hist, int start_depth)
 {
-    if (start_depth > DEPTH_FAR)
+    if (start_depth > DEPTH_MAX_MM)
         return -1;
     int end = start_depth + SLAB;
-    if (end > DEPTH_FAR)
-        end = DEPTH_FAR;
+    if (end > DEPTH_MAX_MM)
+        end = DEPTH_MAX_MM;
     for (int d = start_depth; d <= end; ++d) {
         if (depth_hist[d] > 0)
             return d;
@@ -112,8 +112,8 @@ static int try_depth_candidate(const uint16_t *depth,
         for (int u = U_MIN; u < U_MAX; ++u) {
             uint16_t d = depth[row + u];
             if (d == 0)      continue;
-            if (d < DEPTH_NEAR)    continue;
-            if (d > DEPTH_FAR)     continue;
+            if (d < DEPTH_MIN_MM)    continue;
+            if (d > DEPTH_MAX_MM)     continue;
             if (d < best_depth) continue;
             if (d > slab_max)   continue;
             slab_mask[row + u] = 1;
@@ -249,9 +249,9 @@ static int attempt_depth_candidates(const uint16_t *depth,
                                     int *out_u, int *out_v, uint16_t *out_z)
 {
     int s = start_depth;
-    if (s < DEPTH_NEAR)
-        s = DEPTH_NEAR;
-    while (s <= DEPTH_FAR) {
+    if (s < DEPTH_MIN_MM)
+        s = DEPTH_MIN_MM;
+    while (s <= DEPTH_MAX_MM) {
         int support = slab_population(prefix_hist, s);
         if (support >= min_support) {
             int best_depth = find_first_depth_in_slab(depth_hist, s);
@@ -283,12 +283,7 @@ static int find_head_pixel(const uint16_t *depth,
     uint16_t nearest_sample = 0xFFFF;
     int found_sample = 0;
 
-    int depth_hist[DEPTH_FAR + 1];
-    memset(depth_hist, 0, sizeof(depth_hist));
-
-    // Histogram of valid depth samples inside the search window.  We only need
-    // entries up to FAR (inclusive) because we ignore everything beyond that.
-    int depth_hist[FAR + 1];
+    int depth_hist[DEPTH_MAX_MM + 1];
     memset(depth_hist, 0, sizeof(depth_hist));
 
     for (int v = V_MIN; v < V_MAX; ++v) {
@@ -297,8 +292,8 @@ static int find_head_pixel(const uint16_t *depth,
             uint16_t d = depth[row + u];
 
             if (d == 0)      continue;     // invalid
-            if (d < DEPTH_NEAR)    continue;     // too close
-            if (d > DEPTH_FAR)     continue;     // too far
+            if (d < DEPTH_MIN_MM)    continue;     // too close
+            if (d > DEPTH_MAX_MM)     continue;     // too far
 
             depth_hist[d]++;
 
@@ -312,16 +307,16 @@ static int find_head_pixel(const uint16_t *depth,
     if (!found_sample)
         return 0;
 
-    int prefix_hist[DEPTH_FAR + 1];
+    int prefix_hist[DEPTH_MAX_MM + 1];
     int accum = 0;
-    for (int d = 0; d <= DEPTH_FAR; ++d) {
+    for (int d = 0; d <= DEPTH_MAX_MM; ++d) {
         accum += depth_hist[d];
         prefix_hist[d] = accum;
     }
 
     int search_start = nearest_sample;
-    if (search_start < DEPTH_NEAR)
-        search_start = DEPTH_NEAR;
+    if (search_start < DEPTH_MIN_MM)
+        search_start = DEPTH_MIN_MM;
 
     int thresholds[] = {
         MIN_FOREGROUND_PIXELS,
