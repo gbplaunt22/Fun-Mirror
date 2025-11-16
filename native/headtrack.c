@@ -38,6 +38,12 @@ static uint16_t depth_buf[DW * DH];
 // is further back.
 #define HEAD_WIDTH_M 0.18
 
+// Require at least this many pixels in a depth slab before we accept it as the
+// "foreground" depth.  Without this, isolated noisy samples near the camera can
+// shrink the slab to a tiny range and the tracker never finds the real player
+// unless they stand extremely close.
+#define MIN_FOREGROUND_PIXELS 150
+
 static int estimate_min_blob_width(uint16_t depth_mm)
 {
     // Avoid division by zero; clamp to a plausible range of operating depths.
@@ -75,9 +81,14 @@ static int find_head_pixel(const uint16_t *depth,
     const uint16_t NEAR = 300;   // too close (< ~0.5m) – ignore
     const uint16_t FAR  = 3500;  // too far  (> ~3.5m) – ignore
 
-    uint16_t best_depth = 0xFFFF;
+    uint16_t nearest_sample = 0xFFFF;
     int best_u = -1;
     int best_v = -1;
+
+    // Histogram of valid depth samples inside the search window.  We only need
+    // entries up to FAR (inclusive) because we ignore everything beyond that.
+    int depth_hist[FAR + 1];
+    memset(depth_hist, 0, sizeof(depth_hist));
 
     for (int v = V_MIN; v < V_MAX; ++v) {
         int row = v * DW;
@@ -88,8 +99,10 @@ static int find_head_pixel(const uint16_t *depth,
             if (d < NEAR)    continue;     // too close
             if (d > FAR)     continue;     // too far
 
-            if (d < best_depth) {
-                best_depth = d;
+            depth_hist[d]++;
+
+            if (d < nearest_sample) {
+                nearest_sample = d;
                 best_u = u;
                 best_v = v;
             }
@@ -98,6 +111,57 @@ static int find_head_pixel(const uint16_t *depth,
 
     if (best_u < 0)
         return 0;
+
+    // Pick the nearest depth range that has enough support to actually look
+    // like a foreground blob instead of a handful of stray pixels near the
+    // sensor.  Slide a window the size of SLAB across the histogram and grab
+    // the first window whose population crosses MIN_FOREGROUND_PIXELS.
+    int running = 0;
+    int best_depth_idx = -1;
+    for (int d = NEAR; d <= FAR; ++d) {
+        running += depth_hist[d];
+        int drop_idx = d - SLAB - 1;
+        if (drop_idx >= NEAR) {
+            running -= depth_hist[drop_idx];
+        }
+        if (running >= MIN_FOREGROUND_PIXELS) {
+            int window_start = d - SLAB;
+            if (window_start < NEAR)
+                window_start = NEAR;
+            best_depth_idx = window_start;
+            break;
+        }
+    }
+
+    // Fall back to the first depth with a bit of support if no slab clears the
+    // global population threshold.  This still rejects single-pixel noise but
+    // keeps the tracker alive when the window only covers a small part of the
+    // user.
+    if (best_depth_idx < 0) {
+        const int MIN_LOCAL_SUPPORT = 8;
+        for (int d = NEAR; d <= FAR; ++d) {
+            if (depth_hist[d] >= MIN_LOCAL_SUPPORT) {
+                best_depth_idx = d;
+                break;
+            }
+        }
+    }
+
+    // No reasonable depth candidate? bail.
+    if (best_depth_idx < 0)
+        return 0;
+
+    uint16_t best_depth = nearest_sample;
+    int search = best_depth_idx;
+    int search_max = search + SLAB;
+    if (search_max > FAR)
+        search_max = FAR;
+    while (search <= search_max && depth_hist[search] == 0) {
+        search++;
+    }
+    if (search <= search_max) {
+        best_depth = (uint16_t)search;
+    }
 
     // Foreground mask of everything near the closest observed depth.
     uint8_t slab_mask[DW * DH];
