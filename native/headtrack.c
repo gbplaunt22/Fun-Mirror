@@ -25,6 +25,85 @@ static uint16_t depth_buf[DW * DH];
 static int find_head_pixel(const uint16_t *depth,
                            int *out_u, int *out_v, uint16_t *out_z)
 {
+    // Central region (tunable)
+    int u_min = DW * 3 / 10;
+    int u_max = DW * 7 / 10;
+    int v_min = DH * 2 / 10;
+    int v_max = DH * 8 / 10;
+
+    // 1) Find minimum valid depth in this region
+    uint16_t d_min = 0xFFFF;
+    for (int v = v_min; v < v_max; ++v) {
+        int row = v * DW;
+        for (int u = u_min; u < u_max; ++u) {
+            uint16_t d = depth[row + u];
+            if (d == 0) continue;          // invalid
+            if (d < 200 || d > 4000) continue; // ignore absurd near/far
+            if (d < d_min)
+                d_min = d;
+        }
+    }
+    if (d_min == 0xFFFF) {
+        // nothing plausible
+        return 0;
+    }
+
+    // 2) Foreground slab: a band in front of the camera around the user
+    const uint16_t SLAB = 400; // ~40cm thickness; tweak if needed
+    uint16_t near = d_min;
+    uint16_t far  = d_min + SLAB;
+
+    // 3) For each column in the band, find the top-most foreground pixel
+    //    top_v[u] = first (smallest v) where depth in [near, far], or -1
+    static int top_v[DW];
+    for (int u = 0; u < DW; ++u)
+        top_v[u] = -1;
+
+    for (int v = v_min; v < v_max; ++v) {
+        int row = v * DW;
+        for (int u = u_min; u < u_max; ++u) {
+            uint16_t d = depth[row + u];
+            if (d == 0) continue;
+            if (d < near || d > far) continue;
+
+            if (top_v[u] == -1) {
+                top_v[u] = v;  // first hit in this column = top-most
+            }
+        }
+    }
+
+    // 4) Aggregate columns to get a stable head point
+    int sum_u = 0;
+    int count_u = 0;
+    int best_v = DH;  // smallest v among contributing columns
+
+    for (int u = u_min; u < u_max; ++u) {
+        if (top_v[u] != -1) {
+            sum_u += u;
+            count_u++;
+            if (top_v[u] < best_v)
+                best_v = top_v[u];
+        }
+    }
+
+    if (count_u == 0)
+        return 0;
+
+    int u_head = sum_u / count_u;
+    int v_head = best_v;
+
+    // Get an actual depth value near the head location
+    uint16_t z_head = depth[v_head * DW + u_head];
+    if (z_head == 0) {
+        // fall back to d_min if this particular pixel is invalid
+        z_head = d_min;
+    }
+
+    *out_u = u_head;
+    *out_v = v_head;
+    *out_z = z_head;
+    return 1;
+}
     // Depth thresholds in raw 11-bit units.
     const uint16_t NEAR = 200;   // ignore stuff too close
     const uint16_t FAR  = 2000;  // ignore stuff too far
@@ -108,7 +187,24 @@ static void depth_cb(freenect_device *dev, void *v_depth, uint32_t ts)
     double hx, hy, hz;
     head_pixel_to_3d(u_head, v_head, z_head, &hx, &hy, &hz);
 
-    // Print numeric info under the grid for parsing
+     // --- simple temporal smoothing (exponential moving average) ---
+    static int have_prev = 0;
+    static double shx = 0.0, shy = 0.0, shz = 0.0;
+    const double alpha = 0.25;  // 0..1; higher = more responsive, lower = smoother
+
+    if (have_prev) {
+        hx = alpha * hx + (1.0 - alpha) * shx;
+        hy = alpha * hy + (1.0 - alpha) * shy;
+        hz = alpha * hz + (1.0 - alpha) * shz;
+    } else {
+        have_prev = 1;
+    }
+
+    shx = hx;
+    shy = hy;
+    shz = hz;
+    // --------------------------------------------------------------
+
     printf("HEAD %.6f %.6f %.6f\n", hx, hy, hz);
     fflush(stdout);
 }
