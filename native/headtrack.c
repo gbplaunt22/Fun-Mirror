@@ -22,14 +22,19 @@ static uint16_t depth_buf[DW * DH];
 //  2) treat pixels within [d_min, d_min + SLAB] as foreground
 //  3) for each column, find the top-most foreground pixel
 //  4) aggregate columns to get a stable head point
+// Find a "head" pixel using depth:
+//  1) find nearest valid depth in a central region
+//  2) treat pixels within [d_min, d_min + SLAB] as foreground
+//  3) centroid of those pixels gives horizontal position
+//  4) minimum v among them gives top of head
 static int find_head_pixel(const uint16_t *depth,
                            int *out_u, int *out_v, uint16_t *out_z)
 {
     // Central region (tunable)
-    int u_min = DW * 3 / 10;
-    int u_max = DW * 7 / 10;
-    int v_min = DH * 2 / 10;
-    int v_max = DH * 8 / 10;
+    int u_min = DW / 10;
+    int u_max = DW * 9 / 10;
+    int v_min = DH / 10;
+    int v_max = DH * 9 / 10;
 
     // 1) Find minimum valid depth in this region
     uint16_t d_min = 0xFFFF;
@@ -37,8 +42,8 @@ static int find_head_pixel(const uint16_t *depth,
         int row = v * DW;
         for (int u = u_min; u < u_max; ++u) {
             uint16_t d = depth[row + u];
-            if (d == 0) continue;                 // invalid
-            if (d < 200 || d > 4000) continue;    // ignore absurd near/far
+            if (d == 0) continue;              // invalid
+            if (d < 200 || d > 4000) continue; // too near/far
             if (d < d_min)
                 d_min = d;
         }
@@ -48,15 +53,16 @@ static int find_head_pixel(const uint16_t *depth,
         return 0;
     }
 
-    // 2) Foreground slab around the user
-    const uint16_t SLAB = 400; // ~40 cm thickness; tweak if needed
+    // 2) Foreground slab around the user (about 40 cm thick)
+    const uint16_t SLAB = 400;
     uint16_t near = d_min;
     uint16_t far  = d_min + SLAB;
 
-    // 3) For each column in the band, find the top-most foreground pixel
-    static int top_v[DW];
-    for (int u = 0; u < DW; ++u)
-        top_v[u] = -1;
+    // 3) Accumulate centroid and top-most v
+    long sum_u = 0;
+    long sum_v = 0;
+    int count  = 0;
+    int min_v  = DH;
 
     for (int v = v_min; v < v_max; ++v) {
         int row = v * DW;
@@ -65,43 +71,30 @@ static int find_head_pixel(const uint16_t *depth,
             if (d == 0) continue;
             if (d < near || d > far) continue;
 
-            if (top_v[u] == -1) {
-                top_v[u] = v;   // first hit in this column = top-most
-            }
+            sum_u += u;
+            sum_v += v;
+            count++;
+            if (v < min_v) min_v = v;
         }
     }
 
-        // 4) Choose the column where the blob is highest (smallest v)
-    int best_u = -1;
-    int best_v = DH;  // we want the smallest v
-
-    for (int u = u_min; u < u_max; ++u) {
-        int tv = top_v[u];
-        if (tv != -1 && tv < best_v) {
-            best_v = tv;
-            best_u = u;
-        }
-    }
-
-    if (best_u == -1)
+    if (count == 0)
         return 0;
 
-    int u_head = best_u;
-    int v_head = best_v;
+    int u_head = (int)(sum_u / count); // horizontal center of the blob
+    int v_head = min_v;                // top of the blob
 
-    // Get an actual depth value near the head location
     uint16_t z_head = depth[v_head * DW + u_head];
     if (z_head == 0) {
-        // fall back to d_min if this particular pixel is invalid
-        z_head = d_min;
+        z_head = d_min; // fallback
     }
 
     *out_u = u_head;
     *out_v = v_head;
     *out_z = z_head;
     return 1;
-
 }
+
 
 // Convert head pixel (u,v,z) into rough 3D coordinates in Kinect space (meters)
 static void head_pixel_to_3d(int u, int v, uint16_t z_raw,
