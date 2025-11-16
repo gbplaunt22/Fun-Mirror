@@ -1,6 +1,6 @@
 package mirror;
 
-import org.openkinect.freenect.*;
+//import org.openkinect.freenect.*;
 import javax.swing.*;
 	
 public class Main {
@@ -19,11 +19,10 @@ public class Main {
 			
 			
 			//Kinect setup
-			KinectHelpers helper = new KinectHelpers();
-			Context ctx = Freenect.createContext();
-			Device dev = ctx.openDevice(0);
+			//Context ctx = Freenect.createContext();
+			//Device dev = ctx.openDevice(0);
 			
-			dev.setLed(LedStatus.BLINK_RED_YELLOW);
+			//dev.setLed(LedStatus.BLINK_RED_YELLOW);
 		
 			
 			//Headtracker visualizer

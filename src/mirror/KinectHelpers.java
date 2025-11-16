@@ -1,3 +1,4 @@
+/*
 package mirror;
 
 import org.openkinect.freenect.*;
@@ -105,3 +106,4 @@ public class KinectHelpers {
 	}
 	
 }
+*/

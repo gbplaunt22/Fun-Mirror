@@ -1,4 +1,4 @@
-package mirror;
+/*package mirror;
 
 import org.openkinect.freenect.Context;
 import org.openkinect.freenect.Freenect;
@@ -65,3 +65,4 @@ public class DepthPresenceTest {
 		
 	}
 }
+*/
