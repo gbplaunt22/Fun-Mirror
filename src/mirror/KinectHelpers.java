@@ -104,6 +104,4 @@ public class KinectHelpers {
 		helper.level(dev, 0);
 	}
 	
-	
-	
 }

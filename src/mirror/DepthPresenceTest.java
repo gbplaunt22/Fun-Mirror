@@ -44,12 +44,19 @@ public class DepthPresenceTest {
 		System.out.println("Accel (x,y,z): " + 
 				accel[0] + ", " + accel[1] + ", " + accel[2]);
 
-	////////////////////////////////////////////////
+		////////////////////////////////////////////////
+		
 		//Testing tilt
 		System.out.println("Tilting to 15 degrees...");
 		helper.testTiltHelper(dev,15);
 		helper.sleep(1000);
-	/////////////////////////////////////////////
+
+		
+		//Testing depth presence
+		System.out.println("Testing depth presence...");
+		//Set depth format to REGISTERED
+		dev.setDepthFormat(DepthFormat.REGISTERED);
+		
 		
 		//Shut down
 		dev.setLed(LedStatus.OFF);
