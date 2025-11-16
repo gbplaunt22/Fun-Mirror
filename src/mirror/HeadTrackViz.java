@@ -14,7 +14,7 @@ public class HeadTrackViz extends JPanel {
 		setBackground(Color.WHITE);
 
 		try {
-			headTracker = new HeadTracker("/home/gavin/kinect-headtrack/headtrack");
+			headTracker = new HeadTracker("/home/gavin/Fun-Mirror/native/headtrack");
 			trackerOk = true;
 		} catch (IOException e) {
 			e.printStackTrace();
