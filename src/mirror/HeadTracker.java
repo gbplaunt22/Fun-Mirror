@@ -46,6 +46,9 @@ public class HeadTracker {
 					headX = x;
 					headY = y;
 					headZ = z;
+					
+					// DEBUG:
+					System.out.printf("HeadTracker parsed: x=%.3f y=%.3f z=%.3f%n", x, y, z);
 				} catch (NumberFormatException e) {
 					// ignore bad lines
 				}
