@@ -27,22 +27,16 @@ static uint16_t depth_buf[DW * DH];
 
 // -------- head finder on depth map --------
 
-// Foreground pixels live within this many depth units of the closest sample we
-// can reliably see.  The value is empirical but keeps us from pulling in random
-// background scenery behind the player.
-#define SLAB 400
-
-// Reject skinny blobs that are narrower than this many columns.  Again, this is
-// an empirical choice but avoids locking on to noise.
-#define MIN_BLOB_WIDTH 20
+// Foreground mask parameters for blob selection
+#define SLAB_MM            250   // pixels within best_depth .. best_depth+SLAB are kept
+#define MIN_COL_PIXELS      12   // reject skinny columns that are just noise
+#define MIN_RUN_COLUMNS      6   // need this many adjacent support columns
 
 // Find a "head" pixel using a depth-based person blob:
-//  1) find nearest valid depth in a central region
+//  1) find nearest valid depth in the central window
 //  2) treat pixels within [d_min, d_min + SLAB] as foreground
-//  3) clean the mask with a 3x3 erosion/dilation to suppress speckles
-//  4) scan columns to find the largest contiguous blob of top-most pixels
-//  5) return the centroid of those top pixels for a stable head point
-// Find a "head" pixel in the central region by taking the CLOSEST valid pixel.
+//  3) erode/dilate the mask to discard speckles
+//  4) take the top-most pixels across the dominant column run as the head point
 // Returns 1 if found, 0 otherwise.
 static int find_head_pixel(const uint16_t *depth,
                            int *out_u, int *out_v, uint16_t *out_z)
@@ -75,144 +69,134 @@ static int find_head_pixel(const uint16_t *depth,
     if (best_u < 0)
         return 0;
 
-    // Foreground mask of everything near the closest observed depth.
-    uint8_t slab_mask[DW * DH];
-    memset(slab_mask, 0, sizeof(slab_mask));
-    uint16_t slab_max = best_depth + SLAB;
-    if (slab_max < best_depth) {
-        slab_max = 0xFFFF;  // overflow guard
-    }
+    // Build a foreground mask inside the search window for pixels within the
+    // same depth slab as the best sample.
+    const int region_w = U_MAX - U_MIN;
+    const int region_h = V_MAX - V_MIN;
+    const uint16_t slab_max = best_depth + SLAB_MM;
 
-    for (int v = V_MIN; v < V_MAX; ++v) {
-        int row = v * DW;
-        for (int u = U_MIN; u < U_MAX; ++u) {
-            uint16_t d = depth[row + u];
-            if (d == 0)      continue;
-            if (d < NEAR)    continue;
-            if (d > FAR)     continue;
-            if (d < best_depth) continue;
-            if (d > slab_max)   continue;
-            slab_mask[row + u] = 1;
+    uint8_t mask[region_w * region_h];
+    memset(mask, 0, sizeof(mask));
+
+    for (int v = 0; v < region_h; ++v) {
+        int row = (V_MIN + v) * DW;
+        for (int u = 0; u < region_w; ++u) {
+            uint16_t d = depth[row + (U_MIN + u)];
+            if (d == 0) continue;
+            if (d < NEAR || d > FAR) continue;
+            if (d >= best_depth && d <= slab_max) {
+                mask[v * region_w + u] = 1;
+            }
         }
     }
 
-    // Morphological clean-up: 3x3 erosion followed by dilation.  This keeps
-    // the implementation portable (no SIMD assumptions) while removing speckle
-    // noise from the mask.
-    uint8_t eroded[DW * DH];
+    // Quick morphological cleanup: 3x3 erosion followed by dilation.  This
+    // helps reject isolated pixels without pulling in the entire background.
+    uint8_t eroded[region_w * region_h];
     memset(eroded, 0, sizeof(eroded));
-    for (int v = 1; v < DH - 1; ++v) {
-        int row = v * DW;
-        for (int u = 1; u < DW - 1; ++u) {
-            if (!slab_mask[row + u])
-                continue;
-            int all_neighbors = 1;
-            for (int dv = -1; dv <= 1 && all_neighbors; ++dv) {
-                int nrow = (v + dv) * DW;
+    for (int v = 1; v < region_h - 1; ++v) {
+        for (int u = 1; u < region_w - 1; ++u) {
+            int idx = v * region_w + u;
+            int sum = 0;
+            for (int dv = -1; dv <= 1; ++dv) {
                 for (int du = -1; du <= 1; ++du) {
-                    if (!slab_mask[nrow + (u + du)]) {
-                        all_neighbors = 0;
-                        break;
-                    }
+                    sum += mask[(v + dv) * region_w + (u + du)];
                 }
             }
-            if (all_neighbors) {
-                eroded[row + u] = 1;
-            }
+            if (sum == 9)
+                eroded[idx] = 1;
         }
     }
 
-    uint8_t cleaned[DW * DH];
+    uint8_t cleaned[region_w * region_h];
     memset(cleaned, 0, sizeof(cleaned));
-    for (int v = 1; v < DH - 1; ++v) {
-        int row = v * DW;
-        for (int u = 1; u < DW - 1; ++u) {
-            int any_neighbors = 0;
-            for (int dv = -1; dv <= 1 && !any_neighbors; ++dv) {
-                int nrow = (v + dv) * DW;
+    for (int v = 1; v < region_h - 1; ++v) {
+        for (int u = 1; u < region_w - 1; ++u) {
+            int idx = v * region_w + u;
+            int sum = 0;
+            for (int dv = -1; dv <= 1; ++dv) {
                 for (int du = -1; du <= 1; ++du) {
-                    if (eroded[nrow + (u + du)]) {
-                        any_neighbors = 1;
-                        break;
-                    }
+                    sum += eroded[(v + dv) * region_w + (u + du)];
                 }
             }
-            if (any_neighbors) {
-                cleaned[row + u] = 1;
+            if (sum > 0)
+                cleaned[idx] = 1;
+        }
+    }
+
+    int column_top[region_w];
+    int column_count[region_w];
+    for (int u = 0; u < region_w; ++u) {
+        column_top[u] = -1;
+        column_count[u] = 0;
+        for (int v = 0; v < region_h; ++v) {
+            if (cleaned[v * region_w + u]) {
+                column_count[u]++;
+                if (column_top[u] < 0)
+                    column_top[u] = v;
             }
         }
     }
 
-    int top_v[DW];
-    for (int u = 0; u < DW; ++u) {
-        top_v[u] = -1;
+    // Find the widest contiguous run of well-supported columns.  This tends to
+    // latch onto the top of the largest blob (the person) instead of stray
+    // hands.
+    int best_run_start = -1;
+    int best_run_end = -1;
+    int best_run_score = 0;
+    int run_start = -1;
+    int run_score = 0;
+    int run_len = 0;
+    for (int u = 0; u < region_w; ++u) {
+        if (column_top[u] >= 0 && column_count[u] >= MIN_COL_PIXELS) {
+            if (run_start < 0) {
+                run_start = u;
+                run_score = column_count[u];
+                run_len = 1;
+            } else {
+                run_score += column_count[u];
+                run_len++;
+            }
+        } else {
+            if (run_len >= MIN_RUN_COLUMNS && run_score > best_run_score) {
+                best_run_score = run_score;
+                best_run_start = run_start;
+                best_run_end = run_start + run_len - 1;
+            }
+            run_start = -1;
+            run_score = 0;
+            run_len = 0;
+        }
+    }
+    if (run_len >= MIN_RUN_COLUMNS && run_score > best_run_score) {
+        best_run_score = run_score;
+        best_run_start = run_start;
+        best_run_end = run_start + run_len - 1;
     }
 
-    int total_columns = 0;
-    for (int u = U_MIN; u < U_MAX; ++u) {
-        for (int v = V_MIN; v < V_MAX; ++v) {
-            if (cleaned[v * DW + u]) {
-                top_v[u] = v;
-                total_columns++;
-                break;
-            }
+    if (best_run_start >= 0) {
+        double sum_u = 0.0;
+        double sum_v = 0.0;
+        int samples = 0;
+        for (int u = best_run_start; u <= best_run_end; ++u) {
+            int top = column_top[u];
+            if (top < 0)
+                continue;
+            sum_u += (U_MIN + u);
+            sum_v += (V_MIN + top);
+            samples++;
+        }
+        if (samples > 0) {
+            *out_u = (int)lrint(sum_u / samples);
+            *out_v = (int)lrint(sum_v / samples);
+            *out_z = best_depth;
+            return 1;
         }
     }
 
-    if (total_columns == 0)
-        return 0;
-
-    // Locate the widest contiguous run of columns that have a valid top pixel.
-    int best_start = -1;
-    int best_end = -1;
-    int best_len = 0;
-    int cur_start = -1;
-    int cur_len = 0;
-    for (int u = U_MIN; u < U_MAX; ++u) {
-        if (top_v[u] >= 0) {
-            if (cur_len == 0) {
-                cur_start = u;
-            }
-            cur_len++;
-        } else if (cur_len > 0) {
-            if (cur_len > best_len) {
-                best_len = cur_len;
-                best_start = cur_start;
-                best_end = u - 1;
-            }
-            cur_len = 0;
-        }
-    }
-    if (cur_len > best_len) {
-        best_len = cur_len;
-        best_start = cur_start;
-        best_end = U_MAX - 1;
-    }
-
-    if (best_len < MIN_BLOB_WIDTH || best_start < 0)
-        return 0;
-
-    double sum_u = 0.0;
-    double sum_v = 0.0;
-    int count = 0;
-    for (int u = best_start; u <= best_end; ++u) {
-        if (top_v[u] >= 0) {
-            sum_u += u;
-            sum_v += top_v[u];
-            count++;
-        }
-    }
-
-    if (count == 0)
-        return 0;
-
-    double mean_u = sum_u / count;
-    double mean_v = sum_v / count;
-    int centroid_u = (int)(mean_u >= 0.0 ? mean_u + 0.5 : mean_u - 0.5);
-    int centroid_v = (int)(mean_v >= 0.0 ? mean_v + 0.5 : mean_v - 0.5);
-
-    *out_u = centroid_u;
-    *out_v = centroid_v;
+    // Fall back to the single best pixel if we could not form a stable blob.
+    *out_u = best_u;
+    *out_v = best_v;
     *out_z = best_depth;
     return 1;
 }
