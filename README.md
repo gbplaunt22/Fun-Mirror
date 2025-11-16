@@ -47,6 +47,19 @@ sudo python3 setup.py install
 ```bash
 python3 -c "import freenect; print('freenect imported OK')"
 ```
+
+## Build the native head tracker
+
+The `native/headtrack.c` helper uses `lrint` from libm, so make sure to link
+against `-lm` (either explicitly or via `pkg-config`). From the repo root:
+
+```bash
+gcc native/headtrack.c -o native/headtrack \
+  $(pkg-config --cflags --libs libfreenect) -lm
+```
+
+If your `pkg-config` already expands to a flag list that includes `-lm`, you do
+not need to add the final `-lm` again.
 ----------------------------------------------------------------------
 ## Java Wrapper usage explanation
 
