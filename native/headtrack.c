@@ -206,8 +206,10 @@ static int find_head_pixel(const uint16_t *depth,
     if (count == 0)
         return 0;
 
-    int centroid_u = (int)lround(sum_u / count);
-    int centroid_v = (int)lround(sum_v / count);
+    double mean_u = sum_u / count;
+    double mean_v = sum_v / count;
+    int centroid_u = (int)(mean_u >= 0.0 ? mean_u + 0.5 : mean_u - 0.5);
+    int centroid_v = (int)(mean_v >= 0.0 ? mean_v + 0.5 : mean_v - 0.5);
 
     *out_u = centroid_u;
     *out_v = centroid_v;
