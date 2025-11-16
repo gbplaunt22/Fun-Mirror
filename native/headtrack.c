@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <math.h>
 #include <libfreenect.h>
 
@@ -17,9 +18,42 @@
 #define V_MIN (DH * 2 / 10)
 #define V_MAX (DH * 8 / 10)
 
+#define HEAD_WINDOW_SIZE 15
+#define HEAD_WINDOW_HALF (HEAD_WINDOW_SIZE / 2)
+#define MIN_WINDOW_VALID_PIXELS 45
+#define MIN_WINDOW_MASK_FRACTION 0.35
+#define MIN_CAP_DIFFERENCE_MM 8.0
+#define MIN_VARIANCE_MM2 150.0
+
 static freenect_context *f_ctx = NULL;
 static freenect_device  *f_dev = NULL;
 static uint16_t depth_buf[DW * DH];
+
+static int headtrack_debug_windows_enabled(void)
+{
+    static int initialized = 0;
+    static int enabled = 0;
+    if (!initialized) {
+        const char *env = getenv("HEADTRACK_DEBUG_WINDOWS");
+        if (env && env[0]) {
+            if (env[0] == '1' || env[0] == 't' || env[0] == 'T' || env[0] == 'y' || env[0] == 'Y') {
+                enabled = 1;
+            }
+        }
+        initialized = 1;
+    }
+    return enabled;
+}
+
+static void log_window_score(int u, int v, double coverage, double variance,
+                             double cap_mm, double score, int passes)
+{
+    if (!headtrack_debug_windows_enabled())
+        return;
+    fprintf(stderr,
+            "WINDOW_SCORE u=%d v=%d cov=%.2f var=%.1f cap=%.1f score=%.2f %s\n",
+            u, v, coverage, variance, cap_mm, score, passes ? "PASS" : "FAIL");
+}
 
 // Kinect v1 approximate FOV (radians)
 #define FOVX (57.0 * M_PI / 180.0)
@@ -93,6 +127,135 @@ static int find_first_depth_in_slab(const int *depth_hist, int start_depth)
             return d;
     }
     return -1;
+}
+
+static int select_head_window(const uint16_t *depth,
+                              const uint8_t *mask,
+                              const int *top_v,
+                              int best_start,
+                              int best_end,
+                              int *out_u,
+                              int *out_v,
+                              uint16_t *out_z)
+{
+    int blob_top = V_MAX;
+    for (int u = best_start; u <= best_end; ++u) {
+        if (u < U_MIN || u >= U_MAX)
+            continue;
+        if (top_v[u] >= 0 && top_v[u] < blob_top) {
+            blob_top = top_v[u];
+        }
+    }
+    if (blob_top == V_MAX)
+        return 0;
+
+    int search_v_min = blob_top;
+    if (search_v_min < V_MIN)
+        search_v_min = V_MIN;
+    int search_v_max = blob_top + HEAD_WINDOW_SIZE * 2;
+    if (search_v_max >= V_MAX)
+        search_v_max = V_MAX - 1;
+
+    int u_min = best_start + HEAD_WINDOW_HALF;
+    int u_max = best_end - HEAD_WINDOW_HALF;
+    if (u_min < U_MIN + HEAD_WINDOW_HALF)
+        u_min = U_MIN + HEAD_WINDOW_HALF;
+    if (u_max > U_MAX - HEAD_WINDOW_HALF - 1)
+        u_max = U_MAX - HEAD_WINDOW_HALF - 1;
+    if (u_min > u_max)
+        return 0;
+
+    int v_min = search_v_min + HEAD_WINDOW_HALF;
+    if (v_min < V_MIN + HEAD_WINDOW_HALF)
+        v_min = V_MIN + HEAD_WINDOW_HALF;
+    int v_max = search_v_max - HEAD_WINDOW_HALF;
+    if (v_max > V_MAX - HEAD_WINDOW_HALF - 1)
+        v_max = V_MAX - HEAD_WINDOW_HALF - 1;
+    if (v_min > v_max)
+        return 0;
+
+    const int area = HEAD_WINDOW_SIZE * HEAD_WINDOW_SIZE;
+    double best_score = -1e30;
+    int found = 0;
+    int best_u = 0;
+    int best_v = 0;
+    uint16_t best_z = 0;
+
+    for (int vc = v_min; vc <= v_max; ++vc) {
+        for (int uc = u_min; uc <= u_max; ++uc) {
+            double sum = 0.0;
+            double sum_sq = 0.0;
+            int valid = 0;
+            int mask_hits = 0;
+            double border_sum = 0.0;
+            int border_count = 0;
+            for (int dv = -HEAD_WINDOW_HALF; dv <= HEAD_WINDOW_HALF; ++dv) {
+                int row = (vc + dv) * DW;
+                for (int du = -HEAD_WINDOW_HALF; du <= HEAD_WINDOW_HALF; ++du) {
+                    int col = uc + du;
+                    int idx = row + col;
+                    if (mask[idx]) {
+                        mask_hits++;
+                    }
+                    uint16_t d = depth[idx];
+                    if (d == 0)
+                        continue;
+                    if (d < DEPTH_MIN_MM || d > DEPTH_MAX_MM)
+                        continue;
+                    double dval = (double)d;
+                    sum += dval;
+                    sum_sq += dval * dval;
+                    valid++;
+                    if (abs(du) == HEAD_WINDOW_HALF || abs(dv) == HEAD_WINDOW_HALF) {
+                        border_sum += dval;
+                        border_count++;
+                    }
+                }
+            }
+            if (valid < MIN_WINDOW_VALID_PIXELS)
+                continue;
+            if (border_count == 0)
+                continue;
+            double mean = sum / valid;
+            double variance = (sum_sq / valid) - (mean * mean);
+            if (variance < 0.0)
+                variance = 0.0;
+            double border_mean = border_sum / border_count;
+            double cap_mm = border_mean - mean;
+            double coverage = (double)mask_hits / (double)area;
+            double score = cap_mm;
+            if (variance > 0.0)
+                score += sqrt(variance) * 0.25;
+            score += coverage;
+
+            int passes = 1;
+            if (coverage < MIN_WINDOW_MASK_FRACTION)
+                passes = 0;
+            if (cap_mm < MIN_CAP_DIFFERENCE_MM)
+                passes = 0;
+            if (variance < MIN_VARIANCE_MM2)
+                passes = 0;
+
+            log_window_score(uc, vc, coverage, variance, cap_mm, score, passes);
+            if (!passes)
+                continue;
+            if (!found || score > best_score) {
+                found = 1;
+                best_score = score;
+                best_u = uc;
+                best_v = vc;
+                best_z = (uint16_t)(mean + 0.5);
+            }
+        }
+    }
+
+    if (!found)
+        return 0;
+
+    *out_u = best_u;
+    *out_v = best_v;
+    *out_z = best_z;
+    return 1;
 }
 
 static int try_depth_candidate(const uint16_t *depth,
@@ -234,6 +397,18 @@ static int try_depth_candidate(const uint16_t *depth,
     double mean_v = sum_v / count;
     int centroid_u = (int)(mean_u >= 0.0 ? mean_u + 0.5 : mean_u - 0.5);
     int centroid_v = (int)(mean_v >= 0.0 ? mean_v + 0.5 : mean_v - 0.5);
+
+    int window_u = 0;
+    int window_v = 0;
+    uint16_t window_z = 0;
+    if (select_head_window(depth, cleaned, top_v,
+                           best_start, best_end,
+                           &window_u, &window_v, &window_z)) {
+        *out_u = window_u;
+        *out_v = window_v;
+        *out_z = window_z;
+        return 1;
+    }
 
     *out_u = centroid_u;
     *out_v = centroid_v;
