@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <libfreenect.h>
+#include <limits.h>
 
 #define DW 640
 #define DH 480
@@ -28,6 +29,220 @@
 static freenect_context *f_ctx = NULL;
 static freenect_device  *f_dev = NULL;
 static uint16_t depth_buf[DW * DH];
+
+// ---- simple 3D constant-velocity Kalman filter for head pose ----
+
+#define KF_STATE_DIM 6
+#define KF_MEAS_DIM 3
+#define KF_FRAME_PERIOD (5.0 / 30.0)
+#define KF_PROCESS_NOISE_POS 0.005
+#define KF_PROCESS_NOISE_VEL 0.02
+#define KF_MEAS_NOISE_XY 0.02
+#define KF_MEAS_NOISE_Z 0.01
+#define KF_GATING_THRESHOLD 9.0    // ~= 3-sigma in 3D
+#define KF_LOCK_LOST_FRAMES 15
+
+typedef struct {
+    int initialized;
+    double state[KF_STATE_DIM];
+    double P[KF_STATE_DIM][KF_STATE_DIM];
+    double last_good_pos[3];
+    int frames_since_detection;
+} head_kalman_filter_t;
+
+static head_kalman_filter_t g_head_filter = {0};
+
+static void head_filter_reset(head_kalman_filter_t *filter,
+                              const double measurement[3])
+{
+    memset(filter, 0, sizeof(*filter));
+    for (int i = 0; i < 3; ++i) {
+        filter->state[i] = measurement[i];
+        filter->last_good_pos[i] = measurement[i];
+    }
+    for (int i = 0; i < KF_STATE_DIM; ++i) {
+        filter->P[i][i] = 0.05;
+    }
+    filter->initialized = 1;
+    filter->frames_since_detection = 0;
+}
+
+static void head_filter_predict(head_kalman_filter_t *filter, double dt)
+{
+    if (!filter->initialized)
+        return;
+
+    // State layout: [x y z vx vy vz]
+    for (int i = 0; i < 3; ++i) {
+        filter->state[i] += filter->state[i + 3] * dt;
+    }
+
+    double F[KF_STATE_DIM][KF_STATE_DIM];
+    memset(F, 0, sizeof(F));
+    for (int i = 0; i < KF_STATE_DIM; ++i)
+        F[i][i] = 1.0;
+    for (int i = 0; i < 3; ++i)
+        F[i][i + 3] = dt;
+
+    double temp[KF_STATE_DIM][KF_STATE_DIM];
+    memset(temp, 0, sizeof(temp));
+    for (int i = 0; i < KF_STATE_DIM; ++i) {
+        for (int j = 0; j < KF_STATE_DIM; ++j) {
+            for (int k = 0; k < KF_STATE_DIM; ++k)
+                temp[i][j] += F[i][k] * filter->P[k][j];
+        }
+    }
+
+    double newP[KF_STATE_DIM][KF_STATE_DIM];
+    memset(newP, 0, sizeof(newP));
+    for (int i = 0; i < KF_STATE_DIM; ++i) {
+        for (int j = 0; j < KF_STATE_DIM; ++j) {
+            for (int k = 0; k < KF_STATE_DIM; ++k)
+                newP[i][j] += temp[i][k] * F[j][k];
+        }
+    }
+
+    for (int i = 0; i < KF_STATE_DIM; ++i) {
+        for (int j = 0; j < KF_STATE_DIM; ++j)
+            filter->P[i][j] = newP[i][j];
+    }
+
+    for (int i = 0; i < 3; ++i) {
+        filter->P[i][i] += KF_PROCESS_NOISE_POS;
+        filter->P[i + 3][i + 3] += KF_PROCESS_NOISE_VEL;
+    }
+
+    if (filter->frames_since_detection > 0) {
+        for (int i = 3; i < 6; ++i)
+            filter->state[i] *= 0.85;
+    }
+}
+
+static int head_filter_peek_state(const head_kalman_filter_t *filter,
+                                  double pos[3])
+{
+    if (!filter->initialized)
+        return 0;
+    for (int i = 0; i < 3; ++i)
+        pos[i] = filter->state[i];
+    return 1;
+}
+
+static double clamp(double v, double min_v, double max_v)
+{
+    if (v < min_v)
+        return min_v;
+    if (v > max_v)
+        return max_v;
+    return v;
+}
+
+static int head_filter_get_output(const head_kalman_filter_t *filter,
+                                  double pos[3])
+{
+    if (!head_filter_peek_state(filter, pos))
+        return 0;
+
+    if (filter->frames_since_detection > 0) {
+        int extra = filter->frames_since_detection - KF_LOCK_LOST_FRAMES;
+        double alpha = 0.0;
+        if (extra > 0) {
+            alpha = (double)extra / (extra + 5.0);
+            if (alpha > 1.0)
+                alpha = 1.0;
+        } else {
+            double blend = 0.1 * filter->frames_since_detection;
+            if (blend > 0.5)
+                blend = 0.5;
+            alpha = blend;
+        }
+        for (int i = 0; i < 3; ++i) {
+            pos[i] = (1.0 - alpha) * pos[i] + alpha * filter->last_good_pos[i];
+        }
+    }
+
+    pos[0] = clamp(pos[0], -1.0, 1.0);
+    pos[1] = clamp(pos[1], -1.0, 1.0);
+    return 1;
+}
+
+static void head_filter_register_missed(head_kalman_filter_t *filter)
+{
+    if (!filter->initialized)
+        return;
+    if (filter->frames_since_detection < INT32_MAX)
+        filter->frames_since_detection++;
+    if (filter->frames_since_detection == KF_LOCK_LOST_FRAMES) {
+        fprintf(stderr, "HEAD_FILTER lock lost; falling back to last good position.\n");
+    }
+}
+
+static int head_filter_update(head_kalman_filter_t *filter,
+                              const double measurement[3],
+                              double *nis_out)
+{
+    if (!filter->initialized) {
+        head_filter_reset(filter, measurement);
+        if (nis_out)
+            *nis_out = 0.0;
+        return 1;
+    }
+
+    double residual[3];
+    double S[3];
+    const double meas_noise[3] = {
+        KF_MEAS_NOISE_XY,
+        KF_MEAS_NOISE_XY,
+        KF_MEAS_NOISE_Z
+    };
+    double nis = 0.0;
+    for (int i = 0; i < 3; ++i) {
+        residual[i] = measurement[i] - filter->state[i];
+        S[i] = filter->P[i][i] + meas_noise[i];
+        if (S[i] < 1e-6)
+            S[i] = 1e-6;
+        nis += residual[i] * residual[i] / S[i];
+    }
+    if (nis_out)
+        *nis_out = nis;
+
+    if (nis > KF_GATING_THRESHOLD)
+        return 0;
+
+    double K[KF_STATE_DIM][KF_MEAS_DIM];
+    memset(K, 0, sizeof(K));
+    for (int i = 0; i < KF_STATE_DIM; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            K[i][j] = filter->P[i][j] / S[j];
+        }
+    }
+
+    for (int i = 0; i < KF_STATE_DIM; ++i) {
+        double delta = 0.0;
+        for (int j = 0; j < 3; ++j)
+            delta += K[i][j] * residual[j];
+        filter->state[i] += delta;
+    }
+
+    double HP[3][KF_STATE_DIM];
+    for (int j = 0; j < 3; ++j) {
+        for (int k = 0; k < KF_STATE_DIM; ++k)
+            HP[j][k] = filter->P[j][k];
+    }
+    for (int i = 0; i < KF_STATE_DIM; ++i) {
+        for (int k = 0; k < KF_STATE_DIM; ++k) {
+            double sum = 0.0;
+            for (int j = 0; j < 3; ++j)
+                sum += K[i][j] * HP[j][k];
+            filter->P[i][k] -= sum;
+        }
+    }
+
+    filter->frames_since_detection = 0;
+    for (int i = 0; i < 3; ++i)
+        filter->last_good_pos[i] = filter->state[i];
+    return 1;
+}
 
 static int headtrack_debug_windows_enabled(void)
 {
@@ -546,33 +761,68 @@ static void depth_cb(freenect_device *dev, void *v_depth, uint32_t ts)
     if (frame_count % 5 != 0)
         return;
 
+    head_filter_predict(&g_head_filter, KF_FRAME_PERIOD);
+
     int u_head, v_head;
     uint16_t z_head;
-    if (!find_head_pixel(depth_buf, &u_head, &v_head, &z_head)) {
+    int have_detection = find_head_pixel(depth_buf, &u_head, &v_head, &z_head);
+
+    double hz = 0.0;
+    double hx_raw = 0.0, hy_raw = 0.0;
+    double hx_window = 0.0, hy_window = 0.0;
+    double nis = 0.0;
+    int update_ok = 0;
+
+    if (have_detection) {
+        hx_window = ((double)(u_head - U_MIN) / (double)(U_MAX - U_MIN)) * 2.0 - 1.0;
+        hy_window = ((double)(v_head - V_MIN) / (double)(V_MAX - V_MIN)) * 2.0 - 1.0;
+        hx_window = clamp(hx_window, -1.0, 1.0);
+        hy_window = clamp(hy_window, -1.0, 1.0);
+
+        hx_raw = (u_head - DW / 2.0) / (DW / 2.0);
+        hy_raw = (v_head - DH / 2.0) / (DH / 2.0);
+        hx_raw = clamp(hx_raw, -1.0, 1.0);
+        hy_raw = clamp(hy_raw, -1.0, 1.0);
+
+        hz = z_head / 1000.0;
+
+        double measurement[3] = {hx_raw, hy_raw, hz};
+        update_ok = head_filter_update(&g_head_filter, measurement, &nis);
+        if (!update_ok)
+            head_filter_register_missed(&g_head_filter);
+    } else {
+        head_filter_register_missed(&g_head_filter);
+    }
+
+    double filtered_pos[3];
+    if (!head_filter_get_output(&g_head_filter, filtered_pos)) {
+        if (!have_detection)
+            fprintf(stderr, "HEAD_FILTER waiting for initial lock...\n");
         return;
     }
 
-    // --- Normalized coords in [-1, 1] relative to the search window ---
-    double hx = ( (double)(u_head - U_MIN) / (double)(U_MAX - U_MIN) ) * 2.0 - 1.0;
-    double hy = ( (double)(v_head - V_MIN) / (double)(V_MAX - V_MIN) ) * 2.0 - 1.0;
-    if (hx < -1.0) hx = -1.0;
-    if (hx >  1.0) hx =  1.0;
-    if (hy < -1.0) hy = -1.0;
-    if (hy >  1.0) hy =  1.0;
-    double hz = z_head / 1000.0;                   // meters-ish
+    if (have_detection) {
+        fprintf(stderr,
+                "HEAD_FILTER raw=(%.3f, %.3f, %.3f) window_norm=(%.3f, %.3f) filtered=(%.3f, %.3f, %.3f) %s nis=%.2f frames_missed=%d u=%d v=%d z=%u\n",
+                hx_raw, hy_raw, hz,
+                hx_window, hy_window,
+                filtered_pos[0], filtered_pos[1], filtered_pos[2],
+                update_ok ? "UPDATE" : "REJECT",
+                nis,
+                g_head_filter.frames_since_detection,
+                u_head, v_head, z_head);
+    } else {
+        fprintf(stderr,
+                "HEAD_FILTER no detection; filtered=(%.3f, %.3f, %.3f) frames_missed=%d\n",
+                filtered_pos[0], filtered_pos[1], filtered_pos[2],
+                g_head_filter.frames_since_detection);
+    }
 
-    // Also keep the sensor-relative values for debugging so we can see what
-    // the detector actually latched on to.
-    double hx_raw = (u_head - DW / 2.0) / (DW / 2.0);
-    double hy_raw = (v_head - DH / 2.0) / (DH / 2.0);
+    double hx_out = filtered_pos[0];
+    double hy_out = filtered_pos[1];
+    double hz_out = filtered_pos[2];
 
-    // Helpful debug to stderr: where in the depth image is this?
-    fprintf(stderr,
-            "HEAD_PIXEL u=%d v=%d z=%u  -> raw(%.3f, %.3f) window-norm(%.3f, %.3f) hz=%.3f\n",
-            u_head, v_head, z_head, hx_raw, hy_raw, hx, hy, hz);
-
-    // This is what Java parses: RAW values only
-    printf("HEAD %.6f %.6f %.6f\n", hx, hy, hz);
+    printf("HEAD %.6f %.6f %.6f\n", hx_out, hy_out, hz_out);
     fflush(stdout);
 }
 
