@@ -767,25 +767,29 @@ static void depth_cb(freenect_device *dev, void *v_depth, uint32_t ts)
     uint16_t z_head;
     int have_detection = find_head_pixel(depth_buf, &u_head, &v_head, &z_head);
 
-    double hx = 0.0, hy = 0.0, hz = 0.0;
+    double hz = 0.0;
     double hx_raw = 0.0, hy_raw = 0.0;
+    double hx_window = 0.0, hy_window = 0.0;
     double nis = 0.0;
     int update_ok = 0;
 
     if (have_detection) {
-        hx = ((double)(u_head - U_MIN) / (double)(U_MAX - U_MIN)) * 2.0 - 1.0;
-        hy = ((double)(v_head - V_MIN) / (double)(V_MAX - V_MIN)) * 2.0 - 1.0;
-        hx = clamp(hx, -1.0, 1.0);
-        hy = clamp(hy, -1.0, 1.0);
-        hz = z_head / 1000.0;
-
-        double measurement[3] = {hx, hy, hz};
-        update_ok = head_filter_update(&g_head_filter, measurement, &nis);
-        if (!update_ok)
-            head_filter_register_missed(&g_head_filter);
+        hx_window = ((double)(u_head - U_MIN) / (double)(U_MAX - U_MIN)) * 2.0 - 1.0;
+        hy_window = ((double)(v_head - V_MIN) / (double)(V_MAX - V_MIN)) * 2.0 - 1.0;
+        hx_window = clamp(hx_window, -1.0, 1.0);
+        hy_window = clamp(hy_window, -1.0, 1.0);
 
         hx_raw = (u_head - DW / 2.0) / (DW / 2.0);
         hy_raw = (v_head - DH / 2.0) / (DH / 2.0);
+        hx_raw = clamp(hx_raw, -1.0, 1.0);
+        hy_raw = clamp(hy_raw, -1.0, 1.0);
+
+        hz = z_head / 1000.0;
+
+        double measurement[3] = {hx_raw, hy_raw, hz};
+        update_ok = head_filter_update(&g_head_filter, measurement, &nis);
+        if (!update_ok)
+            head_filter_register_missed(&g_head_filter);
     } else {
         head_filter_register_missed(&g_head_filter);
     }
@@ -799,14 +803,14 @@ static void depth_cb(freenect_device *dev, void *v_depth, uint32_t ts)
 
     if (have_detection) {
         fprintf(stderr,
-                "HEAD_FILTER raw=(%.3f, %.3f, %.3f) filtered=(%.3f, %.3f, %.3f) %s nis=%.2f frames_missed=%d u=%d v=%d z=%u sensor=(%.3f, %.3f)\n",
-                hx, hy, hz,
+                "HEAD_FILTER raw=(%.3f, %.3f, %.3f) window_norm=(%.3f, %.3f) filtered=(%.3f, %.3f, %.3f) %s nis=%.2f frames_missed=%d u=%d v=%d z=%u\n",
+                hx_raw, hy_raw, hz,
+                hx_window, hy_window,
                 filtered_pos[0], filtered_pos[1], filtered_pos[2],
                 update_ok ? "UPDATE" : "REJECT",
                 nis,
                 g_head_filter.frames_since_detection,
-                u_head, v_head, z_head,
-                hx_raw, hy_raw);
+                u_head, v_head, z_head);
     } else {
         fprintf(stderr,
                 "HEAD_FILTER no detection; filtered=(%.3f, %.3f, %.3f) frames_missed=%d\n",
