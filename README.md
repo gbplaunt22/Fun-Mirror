@@ -1,5 +1,7 @@
 # THIS PROJECT IS DEPRECATED UNTIL FURTHER NOTICE! PLEASE TAKE A LOOK AT MY NEW REPO Fun-Mirror-Win
 
+I do plan to update this though. I would like to keep a version working for linux.
+
 
 # Fun-Mirror
 
